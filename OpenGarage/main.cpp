@@ -33,6 +33,8 @@
 #include "OpenGarage.h"
 #include "espconnect.h"
 
+#include <DHT.h>
+
 OpenGarage og;
 ESP8266WebServer *server = NULL;
 DNSServer *dns = NULL;
@@ -64,6 +66,12 @@ static byte door_status_hist = 0;
 static ulong curr_utc_time = 0;
 static ulong curr_utc_hour= 0;
 static HTTPClient http;
+
+// ----- DHT22 -----
+const int TEMPERATURE_INTERVAL = 300;
+unsigned long lastTemperatureSent = 0;
+#define DHTPIN            5         // Pin which is connected to the DHT sensor.
+DHT dht(DHTPIN, DHT22);
 
 void do_setup();
 
@@ -790,6 +798,21 @@ void check_status_ap() {
   }
 }
 
+void send_climate() {
+  if (millis() - lastTemperatureSent >= TEMPERATURE_INTERVAL * 1000UL || lastTemperatureSent == 0) {
+    float t = dht.readTemperature();
+    float h = dht.readHumidity();
+
+    if ( !isnan(t) ) {
+      float tf = t * 1.8 + 32;
+      mqttclient.publish(og.options[OPTION_NAME].sval + "/climate","{\"temperature\":" + String(tf, 1) + ",\"humidity\":" + String(h, 1) + "}");
+      lastTemperatureSent = millis();
+    }
+
+    lastTemperatureSent = millis();
+  }
+}
+
 bool mqtt_connect_subscibe() {
   static ulong mqtt_subscribe_timeout = 0;
   if(curr_utc_time > mqtt_subscribe_timeout) {
@@ -1103,6 +1126,7 @@ void check_status() {
     
     // Process dynamics: automation and notifications
     process_dynamics(event);
+    send_climate();
     checkstatus_timeout = curr_utc_time + og.options[OPTION_RIV].ival;
     
   }
